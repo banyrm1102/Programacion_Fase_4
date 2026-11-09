@@ -1,0 +1,63 @@
+# 1. Configuración del Logger para persistencia en archivo de texto plano
+LOG_FILENAME = "registro_eventos.log"
+
+logger = logging.getLogger("SoftwareFJ")
+logger.setLevel(logging.DEBUG)
+
+# Manejador para archivo (registro permanente de eventos y errores)
+file_handler = logging.FileHandler(LOG_FILENAME, encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+file_handler.setFormatter(file_formatter)
+
+# Manejador para consola (visualización en tiempo de ejecución)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter("[%(levelname)s] %(message)s")
+console_handler.setFormatter(console_formatter)
+
+# Evitar duplicación de manejadores si se reejecuta
+if not logger.handlers:
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+def registrar_evento(mensaje: str):
+    """Registra eventos operacionales exitosos en consola y archivo de logs."""
+    logger.info(mensaje)
+
+def registrar_error(mensaje: str, excepcion: Exception = None):
+    """
+    Registra errores detectados en el sistema sin interrumpir la ejecución,
+    documentando la causa raíz y el encadenamiento de excepciones si existe.
+    """
+    if excepcion:
+        detalle = f"{mensaje} | Tipo: {type(excepcion).__name__} | Causa: {excepcion}"
+        if excepcion.__cause__:
+            detalle += f" | Encadenado desde: {type(excepcion.__cause__).__name__}: {excepcion.__cause__}"
+        logger.error(detalle)
+    else:
+        logger.error(mensaje)
+
+
+# 2. Jerarquía de Excepciones Personalizadas orientadas al dominio del negocio
+class SoftwareFJError(Exception):
+    """Clase base de excepción para todas las fallas operativas de Software FJ."""
+    def __init__(self, mensaje: str, codigo_error: str = "ERR-GENERIC"):
+        super().__init__(mensaje)
+        self.codigo_error = codigo_error
+        self.timestamp = datetime.now()
+
+class DatoInvalidoError(SoftwareFJError):
+    """Lanzada cuando un dato de entrada, parámetro o formato no supera las validaciones."""
+    def __init__(self, mensaje: str):
+        super().__init__(mensaje, codigo_error="ERR-VALIDACION-DATOS")
+
+class ServicioNoDisponibleError(SoftwareFJError):
+    """Lanzada cuando se intenta operar o reservar un servicio que se encuentra inactivo."""
+    def __init__(self, mensaje: str):
+        super().__init__(mensaje, codigo_error="ERR-SERVICIO-NO-DISPONIBLE")
+
+class ReservaInvalidaError(SoftwareFJError):
+    """Lanzada ante operaciones inconsistentes o cálculos fallidos en el flujo de reservas."""
+    def __init__(self, mensaje: str):
+        super().__init__(mensaje, codigo_error="ERR-RESERVA-FALLIDA")
