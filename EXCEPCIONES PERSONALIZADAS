@@ -1,0 +1,260 @@
+from abc import ABC, abstractmethod
+from datetime import datetime, date
+import uuid
+
+# ==========================================
+# 1. EXCEPCIONES PERSONALIZADAS
+# ==========================================
+class SoftwareFJException(Exception):
+    """Clase base para todas las excepciones del sistema."""
+    pass
+
+class ClienteExistenteError(SoftwareFJException):
+    """Se lanza si se intenta registrar un cliente con un ID que ya existe."""
+    pass
+
+class ClienteNoEncontradoError(SoftwareFJException):
+    """Se lanza si no se encuentra el cliente solicitado."""
+    pass
+
+class ServicioNoEncontradoError(SoftwareFJException):
+    """Se lanza si no se encuentra el servicio solicitado."""
+    pass
+
+class ValidacionDatosError(SoftwareFJException):
+    """Se lanza cuando los datos de entrada no cumplen con las reglas de negocio."""
+    pass
+
+class ConflictoReservaError(SoftwareFJException):
+    """Se lanza si el servicio ya está reservado en la fecha solicitada."""
+    pass
+
+
+# ==========================================
+# 2. CAPA DE MODELOS (ABSTRACCIÓN Y HERENCIA)
+# ==========================================
+
+class Cliente:
+    """Clase que encapsula los datos de un cliente."""
+    def __init__(self, id_cliente: str, nombre: str, email: str):
+        if not id_cliente or not nombre or "@" not in email:
+            raise ValidacionDatosError("Datos de cliente inválidos. Verifique el ID, nombre y email.")
+        self.__id_cliente = id_cliente  # Encapsulamiento estricto
+        self.__nombre = nombre
+        self.__email = email
+
+    @property
+    def id_cliente(self) -> str:
+        return self.__id_cliente
+
+    @property
+    def nombre(self) -> str:
+        return self.__nombre
+
+    @property
+    def email(self) -> str:
+        return self.__email
+
+    def __str__(self) -> str:
+        return f"Cliente [{self.__id_cliente}]: {self.__nombre} ({self.__email})"
+
+
+class Servicio(ABC):
+    """Clase abstracta que define la estructura base de un Servicio."""
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float):
+        if precio_base < 0:
+            raise ValidacionDatosError("El precio base no puede ser negativo.")
+        self._id_servicio = id_servicio
+        self._nombre = nombre
+        self._precio_base = precio_base
+
+    @property
+    def id_servicio(self) -> str:
+        return self._id_servicio
+
+    @property
+    def nombre(self) -> str:
+        return self._nombre
+
+    @abstractmethod
+    def calcular_costo(self, *args, **kwargs) -> float:
+        """Método abstracto para el polimorfismo del costo."""
+        pass
+
+    def __str__(self) -> str:
+        return f"{self._nombre} (ID: {self._id_servicio})"
+
+
+class ReservaSala(Servicio):
+    """Clase derivada para la reserva de salas físicas o virtuales."""
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float, capacidad: int):
+        super().__init__(id_servicio, nombre, precio_base)
+        self.__capacidad = capacidad
+
+    def calcular_costo(self, horas: int) -> float:
+        """Polimorfismo: Costo basado en la cantidad de horas."""
+        if horas <= 0:
+            raise ValidacionDatosError("Las horas de reserva deben ser mayores a cero.")
+        return self._precio_base * horas
+
+    def __str__(self) -> str:
+        return f"[Sala] {super().__str__()} - Capacidad: {self.__capacidad} personas"
+
+
+class AlquilerEquipo(Servicio):
+    """Clase derivada para el alquiler de equipos tecnológicos."""
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float, seguro_diario: float):
+        super().__init__(id_servicio, nombre, precio_base)
+        self.__seguro_diario = seguro_diario
+
+    def calcular_costo(self, dias: int) -> float:
+        """Polimorfismo: Costo basado en días de uso más seguro obligatorio."""
+        if dias <= 0:
+            raise ValidacionDatosError("Los días de alquiler deben ser mayores a cero.")
+        return (self._precio_base + self.__seguro_diario) * dias
+
+    def __str__(self) -> str:
+        return f"[Equipo] {super().__str__()} - Seguro Diario: ${self.__seguro_diario}"
+
+
+class AsesoriaEspecializada(Servicio):
+    """Clase derivada para consultorías o asesorías de software."""
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float, consultor: str):
+        super().__init__(id_servicio, nombre, precio_base)
+        self.__consultor = consultor
+
+    def calcular_costo(self, horas: int, es_urgente: bool = False) -> float:
+        """Polimorfismo con argumentos opcionales para emular sobrecarga."""
+        if horas <= 0:
+            raise ValidacionDatosError("Las horas de asesoría deben ser mayores a cero.")
+        costo = self._precio_base * horas
+        if es_urgente:
+            costo *= 1.25  # 25% de recargo por urgencia
+        return costo
+
+    def __str__(self) -> str:
+        return f"[Asesoría] {super().__str__()} - Consultor: {self.__consultor}"
+
+
+class Reserva:
+    """Clase que asocia un Cliente con un Servicio en una fecha específica."""
+    def __init__(self, cliente: Cliente, servicio: Servicio, fecha: date, duracion_medida: int, **kwargs):
+        self.__id_reserva = str(uuid.uuid4())[:8].upper()
+        self.__cliente = cliente
+        self.__servicio = servicio
+        self.__fecha = fecha
+        self.__duracion_medida = duracion_medida
+        # Invoca la implementación polimórfica adecuada según el tipo de servicio
+        self.__costo_total = servicio.calcular_costo(duracion_medida, **kwargs)
+
+    @property
+    def id_reserva(self) -> str:
+        return self.__id_reserva
+
+    @property
+    def servicio(self) -> Servicio:
+        return self.__servicio
+
+    @property
+    def fecha(self) -> date:
+        return self.__fecha
+
+    def __str__(self) -> str:
+        return (f"Reserva #{self.__id_reserva} | Fecha: {self.__fecha} | "
+                f"Cliente: {self.__cliente.nombre} | Servicio: {self.__servicio.nombre} | "
+                f"Total: ${self.__costo_total:.2f}")
+
+
+# ==========================================
+# 3. CONTROLADOR CENTRAL (GESTIÓN EN MEMORIA)
+# ==========================================
+class SoftwareFJCore:
+    """Motor del sistema. Gestiona colecciones en memoria de manera segura."""
+    def __init__(self):
+        self.__clientes = {}   # Diccionario {id_cliente: Cliente}
+        self.__servicios = {}  # Diccionario {id_servicio: Servicio}
+        self.__reservas = []   # Lista interna inicializada correctamente
+
+    def registrar_cliente(self, id_cliente: str, nombre: str, email: str) -> Cliente:
+        if id_cliente in self.__clientes:
+            raise ClienteExistenteError(f"El cliente con ID '{id_cliente}' ya está registrado.")
+        nuevo_cliente = Cliente(id_cliente, nombre, email)
+        self.__clientes[id_cliente] = nuevo_cliente
+        return nuevo_cliente
+
+    def obtener_clientes(self):
+        return list(self.__clientes.values())
+
+    def registrar_servicio(self, servicio: Servicio):
+        if servicio.id_servicio in self.__servicios:
+            raise ValidacionDatosError(f"El ID de servicio '{servicio.id_servicio}' ya existe.")
+        self.__servicios[servicio.id_servicio] = servicio
+
+    def obtener_servicios(self):
+        return list(self.__servicios.values())
+
+    def crear_reserva(self, id_cliente: str, id_servicio: str, fecha_str: str, duracion: int, **kwargs) -> Reserva:
+        if id_cliente not in self.__clientes:
+            raise ClienteNoEncontradoError(f"No se puede reservar. El cliente '{id_cliente}' no existe.")
+        if id_servicio not in self.__servicios:
+            raise ServicioNoEncontradoError(f"No se puede reservar. El servicio '{id_servicio}' no existe.")
+        
+        try:
+            fecha_reserva = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValidacionDatosError("Formato de fecha inválido. Utilice el formato AAAA-MM-DD.")
+
+        if fecha_reserva < date.today():
+            raise ValidacionDatosError("No se pueden realizar reservas para fechas del pasado.")
+
+        cliente = self.__clientes[id_cliente]
+        servicio = self.__servicios[id_servicio]
+
+        # Validación estricta para evitar solapamientos
+        for r in self.__reservas:
+            if r.servicio.id_servicio == id_servicio and r.fecha == fecha_reserva:
+                raise ConflictoReservaError(f"El servicio '{servicio.nombre}' ya está ocupado en la fecha {fecha_reserva}.")
+
+        nueva_reserva = Reserva(cliente, servicio, fecha_reserva, duracion, **kwargs)
+        self.__reservas.append(nueva_reserva)
+        return nueva_reserva
+
+    def obtener_reservas(self):
+        return self.__reservas
+
+
+# ==========================================
+# 4. INTERFAZ DE USUARIO POR CONSOLA
+# ==========================================
+def menu_principal():
+    sistema = SoftwareFJCore()
+    
+    # Datos semilla de demostración
+    try:
+        sistema.registrar_servicio(ReservaSala("S01", "Sala de Juntas Alpha", 50.0, 12))
+        sistema.registrar_servicio(AlquilerEquipo("E01", "Servidor Portátil de Pruebas", 30.0, 10.0))
+        sistema.registrar_servicio(AsesoriaEspecializada("A01", "Consultoría Arquitectura Cloud", 120.0, "Ing. Felipe J."))
+        
+        sistema.registrar_cliente("C01", "Carlos Mendoza", "carlos@mail.com")
+        sistema.registrar_cliente("C02", "Ana Maria Silva", "ana@mail.com")
+    except Exception as e:
+        print(f"Error al precargar datos: {e}")
+
+    while True:
+        print("\n" + "="*45)
+        print("     SISTEMA DE GESTIÓN - SOFTWARE FJ")
+        print("="*45)
+        print("1. Registrar Cliente")
+        print("2. Listar Clientes")
+        print("3. Listar Servicios Disponibles")
+        print("4. Crear una Reserva")
+        print("5. Listar Todas las Reservas")
+        print("6. Salir")
+        print("="*45)
+
+        opcion = input("Seleccione una opción: ").strip()
+
+        if opcion == "1":
+            print("\n--- REGISTRAR NUEVO CLIENTE ---")
+            idc = input("ID de Cliente (ej. C03): ").strip()
+
