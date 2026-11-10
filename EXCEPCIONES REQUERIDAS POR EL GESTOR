@@ -1,0 +1,226 @@
+from abc import ABC, abstractmethod
+from datetime import datetime, date
+import uuid
+
+# ==========================================
+# 1. EXCEPCIONES REQUERIDAS POR EL GESTOR
+# ==========================================
+class SoftwareFJException(Exception):
+    """Clase base para el manejo avanzado de excepciones de Software FJ."""
+    pass
+
+class ClienteNoEncontradoError(SoftwareFJException):
+    """Se lanza si el gestor no encuentra al cliente para la reserva."""
+    pass
+
+class ServicioNoEncontradoError(SoftwareFJException):
+    """Se lanza si el gestor no encuentra el servicio solicitado."""
+    pass
+
+class ValidacionDatosError(SoftwareFJException):
+    """Se lanza si los datos de entrada o fechas son inválidos."""
+    pass
+
+class ConflictoReservaError(SoftwareFJException):
+    """Se lanza si el gestor detecta que el servicio ya está ocupado en esa fecha."""
+    pass
+
+
+# ==========================================
+# 2. ENTIDADES BASE (CLIENTE Y SERVICIOS)
+# ==========================================
+class Cliente:
+    """Clase que encapsula los datos de un cliente."""
+    def __init__(self, id_cliente: str, nombre: str, email: str):
+        self.__id_cliente = id_cliente
+        self.__nombre = nombre
+        self.__email = email
+
+    @property
+    def id_cliente(self) -> str: return self.__id_cliente
+
+    @property
+    def nombre(self) -> str: return self.__nombre
+
+
+class Servicio(ABC):
+    """Clase abstracta que define la estructura y polimorfismo de un Servicio."""
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float):
+        if precio_base < 0:
+            raise ValidacionDatosError("El precio base no puede ser negativo.")
+        self._id_servicio = id_servicio
+        self._nombre = nombre
+        self._precio_base = precio_base
+
+    @property
+    def id_servicio(self) -> str: return self._id_servicio
+
+    @property
+    def nombre(self) -> str: return self._nombre
+
+    @abstractmethod
+    def calcular_costo(self, *args, **kwargs) -> float:
+        """Método abstracto para el cálculo polimórfico del costo."""
+        pass
+
+
+class ReservaSala(Servicio):
+    def calcular_costo(self, horas: int) -> float:
+        if horas <= 0: raise ValidacionDatosError("Las horas deben ser mayores a cero.")
+        return self._precio_base * horas
+
+
+class AlquilerEquipo(Servicio):
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float, seguro_diario: float):
+        super().__init__(id_servicio, nombre, precio_base)
+        self.__seguro_diario = seguro_diario
+
+    def calcular_costo(self, dias: int) -> float:
+        if dias <= 0: raise ValidacionDatosError("Los días deben ser mayores a cero.")
+        return (self._precio_base + self.__seguro_diario) * dias
+
+
+# ==========================================
+# 3. PARTE SOLICITADA: RESERVA
+# ==========================================
+class Reserva:
+    """Clase que asocia un Cliente con un Servicio en una fecha específica (Encapsulación)."""
+    def __init__(self, cliente: Cliente, servicio: Servicio, fecha: date, duracion_medida: int, **kwargs):
+        self.__id_reserva = str(uuid.uuid4())[:8].upper()
+        self.__cliente = cliente
+        self.__servicio = servicio
+        self.__fecha = fecha
+        self.__duracion_medida = duracion_medida
+        # Polimorfismo en acción: calcula el costo dinámicamente según el tipo de servicio
+        self.__costo_total = servicio.calcular_costo(duracion_medida, **kwargs)
+
+    @property
+    def id_reserva(self) -> str:
+        return self.__id_reserva
+
+    @property
+    def servicio(self) -> Servicio:
+        return self.__servicio
+
+    @property
+    def fecha(self) -> date:
+        return self.__fecha
+
+    @property
+    def costo_total(self) -> float:
+        return self.__costo_total
+
+    def __str__(self) -> str:
+        return (f"Reserva #{self.__id_reserva} | Fecha: {self.__fecha} | "
+                f"Cliente: {self.__cliente.nombre} | Servicio: {self.__servicio.nombre} | "
+                f"Total: ${self.__costo_total:.2f}")
+
+
+# ==========================================
+# 4. PARTE SOLICITADA: GESTOR CENTRAL
+# ==========================================
+class SoftwareFJCore:
+    """Controlador central del sistema. Gestiona listas internas sin base de datos."""
+    def __init__(self):
+        self.__clientes = {}   # Diccionario interno de clientes
+        self.__servicios = {}  # Diccionario interno de servicios
+        self.__reservas = []   # Manejo de lista interna de reservas
+
+    # Métodos auxiliares para alimentar al gestor en memoria
+    def agregar_cliente_al_sistema(self, cliente: Cliente):
+        self.__clientes[cliente.id_cliente] = cliente
+
+    def agregar_servicio_al_sistema(self, servicio: Servicio):
+        self.__servicios[servicio.id_servicio] = servicio
+
+    # --- Lógica Principal del Gestor de Reservas ---
+    def crear_reserva(self, id_cliente: str, id_servicio: str, fecha_str: str, duracion: int, **kwargs) -> Reserva:
+        """
+        Crea, valida e inserta una reserva en la lista interna.
+        Garantiza la estabilidad aplicando validaciones estrictas y excepciones.
+        """
+        # 1. Validaciones de Existencia
+        if id_cliente not in self.__clientes:
+            raise ClienteNoEncontradoError(f"Error: El cliente '{id_cliente}' no existe en el sistema.")
+        if id_servicio not in self.__servicios:
+            raise ServicioNoEncontradoError(f"Error: El servicio '{id_servicio}' no existe.")
+        
+        # 2. Validación y Conversión de Fechas
+        try:
+            fecha_reserva = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValidacionDatosError("Error: Formato de fecha inválido. Debe ser AAAA-MM-DD.")
+
+        if fecha_reserva < date.today():
+            raise ValidacionDatosError("Error: No se permiten reservas para fechas del pasado.")
+
+        cliente = self.__clientes[id_cliente]
+        servicio = self.__servicios[id_servicio]
+
+        # 3. Validación de Conflictos (Regla de negocio: No duplicar servicio el mismo día)
+        for r in self.__reservas:
+            if r.servicio.id_servicio == id_servicio and r.fecha == fecha_reserva:
+                raise ConflictoReservaError(f"Conflicto: El servicio '{servicio.nombre}' ya está reservado para el {fecha_reserva}.")
+
+        # 4. Instanciación Segura
+        nueva_reserva = Reserva(cliente, servicio, fecha_reserva, duracion, **kwargs)
+        self.__reservas.append(nueva_reserva)
+        return nueva_reserva
+
+    def obtener_todas_las_reservas(self):
+        """Retorna la lista interna de reservas."""
+        return self.__reservas
+
+
+# ==========================================
+# DEMOSTRACIÓN DE FUNCIONAMIENTO Y RESILIENCIA
+# ==========================================
+if __name__ == "__main__":
+    # 1. Instanciar el Gestor Central
+    gestor = SoftwareFJCore()
+
+    # 2. Registrar datos simulados en los almacenes del gestor
+    cliente_test = Cliente("C01", "Diego Forlán", "diego@mail.com")
+    sala_test = ReservaSala("S01", "Sala de Audiovisuales", 40.0)
+    equipo_test = AlquilerEquipo("E01", "Kit VR Oculus Quest", 25.0, 5.0)
+
+    gestor.agregar_cliente_al_sistema(cliente_test)
+    gestor.agregar_servicio_al_sistema(sala_test)
+    gestor.agregar_servicio_al_sistema(equipo_test)
+
+    print("--- CASO 1: Creación Exitosa de Reservas ---")
+    try:
+        # Reserva exitosa de sala por 3 horas
+        r1 = gestor.crear_reserva("C01", "S01", "2026-11-20", 3)
+        print(f"[OK] {r1}")
+
+        # Reserva exitosa de equipo por 2 días
+        r2 = gestor.crear_reserva("C01", "E01", "2026-11-21", 2)
+        print(f"[OK] {r2}")
+    except SoftwareFJException as e:
+        print(f"[FALLO INESPERADO]: {e}")
+
+    print("\n--- CASO 2: Resiliencia del Gestor ante Errores de Negocio (El sistema no se cae) ---")
+    
+    # Intento A: Registrar en la misma fecha del mismo servicio (ConflictoReservaError)
+    try:
+        gestor.crear_reserva("C01", "S01", "2026-11-20", 5)
+    except SoftwareFJException as e:
+        print(f"Capturado correctamente -> {e}")
+
+    # Intento B: Fecha en el pasado (ValidacionDatosError)
+    try:
+        gestor.crear_reserva("C01", "S01", "2023-01-01", 2)
+    except SoftwareFJException as e:
+        print(f"Capturado correctamente -> {e}")
+
+    # Intento C: Cliente inexistente (ClienteNoEncontradoError)
+    try:
+        gestor.crear_reserva("ID_FALSO", "S01", "2026-11-25", 1)
+    except SoftwareFJException as e:
+        print(f"Capturado correctamente -> {e}")
+
+    print("\n--- CASO 3: Listado Final en el Gestor ---")
+    print(f"Total de reservas estables en memoria: {len(gestor.obtener_todas_las_reservas())}")
+    for res in gestor.obtener_todas_las_reservas():
+        print(f" -> {res}")
