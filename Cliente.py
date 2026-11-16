@@ -9,7 +9,7 @@ Si un dato es inválido se lanza ClienteInvalidoError (definida en excepciones.p
 
 import re
 
-from entidad import entidad
+from Entidad import Entidad
 from excepciones import ClienteInvalidoError
 
 
